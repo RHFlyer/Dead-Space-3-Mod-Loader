@@ -1,0 +1,7 @@
+Resource Counter: changelog
+===========================
+
+Newest first.
+
+1.0.0
+  - First public release.

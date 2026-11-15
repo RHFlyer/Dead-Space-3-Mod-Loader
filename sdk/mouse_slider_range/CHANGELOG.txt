@@ -1,0 +1,7 @@
+Mouse Slider Range: changelog
+=============================
+
+Newest first.
+
+1.0.0
+  - First public release.

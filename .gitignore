@@ -1,0 +1,7 @@
+build/
+release/
+*.log
+*.user
+.vs/
+__pycache__/
+scripts/*.txt

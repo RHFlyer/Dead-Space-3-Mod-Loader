@@ -1,0 +1,23 @@
+Changelog
+=========
+
+1.0.0 (first public release)
+  - The DS3 Mod Loader: one proxy DLL (dinput8.dll) that runs drop-in mods from plugins\, with an in-game Mods
+    panel (pause > "mods", F11, or Back on a pad) with every mod's switch and the settings it lists. The loader is
+    only the framework: every feature is a mod.
+  - Optional add-ons, all in one download with a READ ME FIRST.txt that says what each does: Raw Input Mouse Fix, Ration Seal Store, Auto Pickup, Resource Counter,
+    Mouse Slider Range, Hello Mod. Each is also an example for mod makers: Mouse Slider Range needs no code (a patch
+    mod, only a mod.ini); the others are DLL mods in C++. The source download has the source of all six.
+  - The Raw Input Mouse Fix add-on is based on the fix by slopkhayzo (MIT), rebuilt with the SDK; credited in
+    THIRD-PARTY-NOTICES.txt. Like every add-on it is off until you switch it on in the Mods panel. Its speed
+    follows the game's Mouse Sensitivity slider (UseGameSlider on; at slider 50 the multiplier is 0.50).
+  - For mod makers: the SDK, in the source download (sdk\ds3mod.h, API 3), with hot reload, drawing with any Windows font and fading
+    boxes, patch mods that need no code, a guide in
+    sdk\README.md with a "What you need" list, a step-by-step for moving an existing ASI mod into plugins\, the
+    known game addresses (sdk\GAME_NOTES.md), and a read-only memory inspector (sdk\tools\ds3_mcp.py).
+  - Made for updates: a new version of a mod is unzipped over the old one, and your switch and settings stay. A mod
+    says which loader it needs (min_loader= in its mod.ini), and an older loader shows "needs loader" in the Mods
+    panel instead of loading it. The rules for mod makers: sdk\README.md, "Releasing and updating your mod".
+  - Source code under the MIT licence.
+
+Before 1.0: private test builds, never released.

@@ -1,0 +1,11 @@
+Auto Pickup: changelog
+======================
+
+Newest first.
+
+1.0.0
+  - First public release.
+  - Collects dropped items as if every weapon had an Ammo Sweeper attached, all around you within a reach you set.
+  - Leaves weapons, weapon parts, circuits, keys and mission items for you, and stops at a number of med and stasis
+    packs.
+  - A small list in the bottom-right corner of what you just picked up.
