@@ -40,7 +40,7 @@ ones you want.
 ## Install (players)
 
 1. **Back up your saves**: copy `Documents\EA Games\Dead Space 3` somewhere safe.
-2. Download `ds3-mod-loader-v1.0.0.zip` from [Releases](https://github.com/RHFlyer/DS3-Mod-Loader/releases).
+2. Download `ds3-mod-loader-v1.0.0.zip` from [Releases](https://github.com/RHFlyer/Dead-Space-3-Mod-Loader/releases).
 3. Unzip it into the game folder, next to `deadspace3.exe` (Steam: right-click Dead Space 3 > Manage > Browse
    local files). That adds `dinput8.dll`, `ds3_mods.ini`, a `plugins` folder for add-ons and a
    `DS3 Mod Loader docs` folder.
@@ -80,8 +80,8 @@ under "Older Downloads"; "Desktop development with C++") and CMake. Use `git clo
 ZIP" leaves out MinHook (`third_party/minhook`), and the build fails without it.
 
 ```
-git clone --recurse-submodules https://github.com/RHFlyer/DS3-Mod-Loader
-cd DS3-Mod-Loader
+git clone --recurse-submodules https://github.com/RHFlyer/Dead-Space-3-Mod-Loader
+cd Dead-Space-3-Mod-Loader
 cmake -S . -B build -A Win32
 cmake --build build --config Release
 ```
