@@ -58,8 +58,9 @@ jobs:
 
       - name: Label the output as a test build
         run: |
+          # Parentheses: without them the comma binds first and the + joins all three lines into one.
           Set-Content -Encoding utf8 build/NOT-A-RELEASE.txt @(
-            'Unofficial test build made by GitHub Actions from commit ' + $env:GITHUB_SHA + '.',
+            ('Unofficial test build made by GitHub Actions from commit ' + $env:GITHUB_SHA + '.'),
             'It shows that the source compiles. It was not tested in the game.',
             'To play, use the release downloads on the Releases page instead.'
           )
