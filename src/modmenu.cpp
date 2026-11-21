@@ -76,7 +76,7 @@ struct Row {
     int index;  // into kSettings, ModAt or ModSettingAt
     const char* heading;
 };
-constexpr int kMaxRows = 256;  // built-in rows + kMaxMods switches + kMaxModSettings settings + their headings
+constexpr int kMaxRows = 384;  // built-in rows + kMaxMods switches + kMaxModSettings settings + their headings
 Row g_rows[kMaxRows];
 int g_rowCount = 0;
 
@@ -87,7 +87,11 @@ Config g_startup;  // what the game started with, for "applies after restart"
 bool g_pauseOk = false;
 int g_capture = -1;            // the key setting row waiting for a key press, or -1
 bool g_prevKeys[256] = {};     // keys held the frame before, for the key press it waits for
-char g_helpText[256] = {};
+char g_helpText[512] = {};  // a mod's description (159) and author / version, plus the loader's own hints
+// The footer shows two lines of help; longer help scrolls by itself, a line at a time, and starts over.
+constexpr ULONGLONG kHelpHoldMs = 3000, kHelpStepMs = 2500;
+int g_helpRow = -2;  // the row (and key wait) the footer's scrolling started for
+ULONGLONG g_helpSince = 0;
 
 bool g_open = false;
 bool g_releasing = false;  // closed, but the game stays blocked until the keys that closed it are let go
@@ -240,10 +244,20 @@ void ChangeSetting(const Setting& s, int dir)
 
 void ChangeModSwitch(Mod& m)
 {
+    if (m.problem[0] && !m.enabled) {  // a file that can never be loaded: "On" would promise something
+        char text[96];
+        sprintf_s(text, "This file can't be switched on: %s.", m.problem);
+        SetStatus(text, kWarn);
+        return;
+    }
     m.enabled = !m.enabled;
     bool saved = WriteModSwitch(m);
-    Log("mods panel: [modules] %s -> %d (%s, applies after restart)", m.id, m.enabled ? 1 : 0,
-        saved ? "saved" : "NOT saved");
+    if (m.basic)
+        Log("mods panel: [basic_mods] %ls -> %d (%s, applies after restart)", m.switchKey, m.enabled ? 1 : 0,
+            saved ? "saved" : "NOT saved");
+    else
+        Log("mods panel: [modules] %s -> %d (%s, applies after restart)", m.id, m.enabled ? 1 : 0,
+            saved ? "saved" : "NOT saved");
     if (saved && m.needsLoader) {
         char text[96];
         sprintf_s(text, "Saved, but this mod needs DS3 Mod Loader %s or later.", m.minLoader);
@@ -375,8 +389,24 @@ void BuildRows()
         if (!heading) heading = AddRow(RowType::Heading, -1, kSwitchGroup);
         AddRow(RowType::Setting, i, nullptr);
     }
-    if (ModCount() && !heading) AddRow(RowType::Heading, -1, kSwitchGroup);
-    for (int i = 0; i < ModCount(); ++i) AddRow(RowType::ModSwitch, i, nullptr);
+    int basics = 0;
+    for (int i = 0; i < ModCount(); ++i) basics += ModAt(i).basic ? 1 : 0;
+    if (ModCount() > basics && !heading) AddRow(RowType::Heading, -1, kSwitchGroup);
+    for (int i = 0; i < ModCount(); ++i) {
+        if (!ModAt(i).basic) AddRow(RowType::ModSwitch, i, nullptr);
+    }
+    // Basic mods: plain .asi files with no mod.ini, under their own heading.
+    if (basics) {
+        static char basicHeading[80];
+        if (ModsOtherLoader()[0])
+            sprintf_s(basicHeading, "Basic mods (left to %s)", ModsOtherLoader());
+        else
+            strcpy_s(basicHeading, "Basic mods");
+        AddRow(RowType::Heading, -1, basicHeading);
+        for (int i = 0; i < ModCount(); ++i) {
+            if (ModAt(i).basic) AddRow(RowType::ModSwitch, i, nullptr);
+        }
+    }
     // The loader's other settings, under their groups.
     const char* group = nullptr;
     for (int i = 0; i < kSettingCount; ++i) {
@@ -388,10 +418,13 @@ void BuildRows()
         }
         AddRow(RowType::Setting, i, nullptr);
     }
-    // Each mod's settings, under their groups (the mod's name unless the manifest names one).
+    // Each loaded mod's settings, under their groups (the mod's name unless the manifest names one). A mod that is not
+    // loaded keeps only its switch, so the panel is not filled with settings that do nothing; its switch's footer
+    // says so. A switch only applies after a restart, so building the rows once is enough.
     group = nullptr;
     for (int i = 0; i < ModSettingCount(); ++i) {
         const ModSetting& s = ModSettingAt(i);
+        if (!ModAt(s.mod).loaded) continue;
         if (!group || std::strcmp(group, s.group) != 0) {
             group = s.group;
             if (g_rowCount >= kMaxRows - 2) break;
@@ -407,6 +440,23 @@ void BuildRows()
 const char* ModHelp(const Mod& m)
 {
     g_helpText[0] = '\0';
+    if (m.basic) {
+        if (std::strcmp(m.problem, "needs its mod.ini") == 0)
+            _snprintf_s(g_helpText, _TRUNCATE, "plugins\\%ls is a DS3 Mod Loader mod without its mod.ini. Copy the "
+                        "mod's whole folder into plugins\\ instead of only this file.", m.switchKey);
+        else if (m.problem[0])
+            _snprintf_s(g_helpText, _TRUNCATE, "plugins\\%ls can't be loaded (%s). Dead Space 3 is a 32-bit game: a "
+                        "mod must be a 32-bit (x86) build.", m.switchKey, m.problem);
+        else if (ModsOtherLoader()[0])
+            _snprintf_s(g_helpText, _TRUNCATE, "%s is also installed and loads .asi files by itself, so this switch "
+                        "can't control plugins\\%ls. Using both loaders is not supported: remove one.",
+                        ModsOtherLoader(), m.switchKey);
+        else
+            _snprintf_s(g_helpText, _TRUNCATE, "%s%sBasic mod (plugins\\%ls): a plain ASI, loaded as it is and not "
+                        "checked. No settings or reload here; its own files hold its settings.", m.description,
+                        m.description[0] ? " " : "", m.switchKey);
+        return g_helpText;
+    }
     if (m.description[0]) strcpy_s(g_helpText, m.description);
     char by[96] = {};
     if (m.author[0] && m.version[0])
@@ -426,6 +476,15 @@ const char* ModHelp(const Mod& m)
         _snprintf_s(need, _TRUNCATE, "Not loaded: needs DS3 Mod Loader %s or later (this is " DS3_PROXY_VERSION "). %s",
                     m.minLoader, g_helpText);
         strcpy_s(g_helpText, need);
+    }
+    // Its settings are left out of the panel while it is not loaded (BuildRows).
+    bool hasSettings = false;
+    for (int i = 0; i < ModSettingCount() && !hasSettings; ++i) hasSettings = &ModAt(ModSettingAt(i).mod) == &m;
+    if (hasSettings && !m.loaded) {
+        const size_t used = std::strlen(g_helpText);
+        _snprintf_s(g_helpText + used, sizeof(g_helpText) - used, _TRUNCATE, "%s%s", used ? " " : "",
+                    m.enabled ? "Its settings show here once it loads (after a restart)."
+                              : "Switch it on and restart the game to see its settings.");
     }
     return g_helpText;
 }
@@ -484,6 +543,8 @@ void Open()
     if (!Selectable(g_selected)) Move(1);
     g_status[0] = '\0';
     InputSetBlocked(true);
+    if (ModsSafeStart())
+        SetStatus("Safe start: no mods loaded this time. Switch off the newest one, then restart.", kWarn);
     Log("mods panel: opened");
 }
 
@@ -972,14 +1033,15 @@ bool Update(float width, float height, void* window, int* textPx)
 
 // ---- Drawing ----
 
-// Draws text wrapped to maxW, at most maxLines lines.
-void DrawWrapped(OverlayCanvas& c, float x, float y, float maxW, const char* text, unsigned color, int maxLines)
+// Draws text wrapped to maxW: at most maxLines lines, starting with line `skip`. Returns how many lines it needs.
+int DrawWrapped(OverlayCanvas& c, float x, float y, float maxW, const char* text, unsigned color, int maxLines,
+                int skip = 0)
 {
     const float lh = c.LineHeight();
     char line[256];
     int lines = 0;
     const char* p = text;
-    while (*p && lines < maxLines) {
+    while (*p) {
         size_t len = 0, lastBreak = 0;
         while (p[len]) {
             char test[256];
@@ -993,13 +1055,16 @@ void DrawWrapped(OverlayCanvas& c, float x, float y, float maxW, const char* tex
         size_t take = p[len] && lastBreak ? lastBreak : len;
         if (!take) take = 1;
         take = std::min(take, sizeof(line) - 1);
-        memcpy(line, p, take);
-        line[take] = '\0';
-        c.Text(x, y + lines * lh, line, color);
+        if (lines >= skip && lines < skip + maxLines) {
+            memcpy(line, p, take);
+            line[take] = '\0';
+            c.Text(x, y + (lines - skip) * lh, line, color);
+        }
         p += take;
         while (*p == ' ') ++p;
         ++lines;
     }
+    return lines;
 }
 
 void DrawCursor(OverlayCanvas& c, float x, float y)
@@ -1112,11 +1177,25 @@ void DrawPanel(OverlayCanvas& c)
             on = m.enabled;
             strcpy_s(value, on ? "On" : "Off");
             changed = m.enabled != m.startup;
-            tag = changed ? "applies after restart" : (m.startup && !m.loaded) ? "did not load, see log" : "restart";
-            if (!changed && m.startup && !m.loaded) changed = true;  // shown in the warning colour
+            if (changed) {
+                tag = "applies after restart";
+            } else if (m.startup && !m.loaded) {
+                // On, but not running: say why, in the warning colour.
+                changed = true;
+                if (ModsSafeStart())
+                    tag = m.changed ? "safe start: new or changed" : "safe start: not loaded";
+                else
+                    tag = m.notLoaded[0] ? m.notLoaded : "did not load, see log";
+            } else {
+                tag = "restart";
+            }
             if (m.needsLoader) {
                 sprintf_s(tagText, "needs loader %s", m.minLoader);
                 tag = tagText;
+                changed = true;
+            }
+            if (m.problem[0]) {
+                tag = m.problem;
                 changed = true;
             }
         } else {
@@ -1182,7 +1261,24 @@ void DrawPanel(OverlayCanvas& c)
         else
             help = "Back to the pause menu.";
     }
-    DrawWrapped(c, px + pad, fy, panelW - 2 * pad, help, 0xFFC8CED4, 2);
+    // Help longer than two lines: the first two stay a moment, then it moves up a line every kHelpStepMs, waits at
+    // the end, and starts over. A new row (or a key wait) starts from the top.
+    const ULONGLONG now = GetTickCount64();
+    const int helpRow = g_capture == g_selected ? -1 - g_selected : g_selected;
+    if (helpRow != g_helpRow) {
+        g_helpRow = helpRow;
+        g_helpSince = now;
+    }
+    const float helpW = panelW - 2 * pad - c.TextWidth("v") - lh * 0.4f;  // room for the "more" mark
+    const int extra = std::max(0, DrawWrapped(c, px + pad, fy, helpW, help, 0, 0) - 2);
+    int skip = 0;
+    if (extra) {
+        const ULONGLONG t = (now - g_helpSince) % (2 * kHelpHoldMs + extra * kHelpStepMs);
+        skip = t < kHelpHoldMs ? 0 : std::min(extra, 1 + static_cast<int>((t - kHelpHoldMs) / kHelpStepMs));
+    }
+    DrawWrapped(c, px + pad, fy, helpW, help, 0xFFC8CED4, 2, skip);
+    if (skip > 0) c.Text(px + panelW - pad - c.TextWidth("^"), fy, "^", kDim);
+    if (skip < extra) c.Text(px + panelW - pad - c.TextWidth("v"), fy + lh, "v", kDim);
     fy += lh * 2.1f;
     if (g_status[0] && GetTickCount64() - g_statusAt < kStatusMs) c.Text(px + pad, fy, g_status, g_statusColor);
     fy += lh * 1.15f;
@@ -1218,12 +1314,63 @@ void DrawButton(OverlayCanvas& c)
     c.Text(tx, ty, "mods", Faded(lit ? 0xFFFFFFFF : 0xFF7CC4EC, alpha));
 }
 
+// The game draws its mouse cursor into the frame itself, so the button, drawn over the finished frame, covers it. Over
+// the button, a copy styled after the game's (light grey arrow, dark edge) is drawn on top, cut to the button: off the
+// button the game's own cursor shows as it is. The game's cursor is not touched.
+void FillClipped(OverlayCanvas& c, const float (*pts)[2], int n, float ox, float oy, float k, const Box& clip,
+                 unsigned color)
+{
+    float top = 1e9f, bottom = -1e9f;
+    for (int i = 0; i < n; ++i) {
+        top = std::min(top, oy + pts[i][1] * k);
+        bottom = std::max(bottom, oy + pts[i][1] * k);
+    }
+    top = std::max(std::floor(top), clip.y);
+    bottom = std::min(std::ceil(bottom), clip.y + clip.h);
+    for (float y = top; y < bottom; y += 1.0f) {
+        const float sy = y + 0.5f;
+        float xs[8];
+        int m = 0;
+        for (int i = 0; i < n && m < 8; ++i) {
+            const float x0 = ox + pts[i][0] * k, y0 = oy + pts[i][1] * k;
+            const float x1 = ox + pts[(i + 1) % n][0] * k, y1 = oy + pts[(i + 1) % n][1] * k;
+            if ((y0 <= sy) != (y1 <= sy)) xs[m++] = x0 + (sy - y0) * (x1 - x0) / (y1 - y0);
+        }
+        std::sort(xs, xs + m);
+        for (int j = 0; j + 1 < m; j += 2) {
+            const float a = std::max(std::round(xs[j]), clip.x), b = std::min(std::round(xs[j + 1]), clip.x + clip.w);
+            if (b > a) c.Rect(a, y, b - a, 1, color);
+        }
+    }
+}
+
+void DrawButtonCursor(OverlayCanvas& c)
+{
+    // The game's arrow, tip at (0, 0), in 1080p pixels: measured from a 1080p screenshot of it next to the button.
+    static const float kArrow[][2] = {{0, 0},  {21, 15.5f}, {13.5f, 16.5f}, {19.5f, 32.5f},
+                                      {16, 33}, {8.5f, 17.5f}, {1, 26.5f},    {0, 26.5f}};
+    constexpr int n = static_cast<int>(sizeof(kArrow) / sizeof(kArrow[0]));
+    const Box& r = g_buttonBox;
+    const float k = r.w / (kButtonRight - kButtonLeft);  // the button's own scale
+    const float x = std::round(g_cursorX), y = std::round(g_cursorY);
+    if (!g_cursorShown || x + 22 * k < r.x || x - 1 > r.x + r.w || y + 34 * k < r.y || y - 1 > r.y + r.h) return;
+    const float alpha = ButtonAlpha();
+    const unsigned edge = Faded(0x90202020, alpha), fill = Faded(0xFFE2E2E2, alpha);  // the game's edge is soft
+    for (int d = 0; d < 4; ++d) {  // the dark edge: the arrow one pixel off in each direction, under the fill
+        const float dx = d == 0 ? -1.0f : d == 1 ? 1.0f : 0.0f, dy = d == 2 ? -1.0f : d == 3 ? 1.0f : 0.0f;
+        FillClipped(c, kArrow, n, x + dx, y + dy, k, r, edge);
+    }
+    FillClipped(c, kArrow, n, x, y, k, r, fill);
+}
+
 void Draw(OverlayCanvas& c)
 {
-    if (g_open)
+    if (g_open) {
         DrawPanel(c);
-    else
+    } else {
         DrawButton(c);
+        DrawButtonCursor(c);
+    }
 }
 
 }  // namespace

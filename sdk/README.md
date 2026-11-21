@@ -2,8 +2,8 @@
 
 The DS3 proxy (`dinput8.dll`) loads mods from the game's `plugins` folder. A mod is a folder with a `mod.ini` that
 describes it, and either a DLL or a few patches written in the `mod.ini` itself. Drop the folder in, and the mod shows
-up in the in-game Mods panel (pause, then **mods**, or F11). Its settings show up there too, with no change to the
-proxy.
+up in the in-game Mods panel (pause, then **mods**, or F11). Its settings show up there too while it is loaded, with
+no change to the proxy.
 
 There are two kinds of mod:
 - **A patch mod** is only a `mod.ini`, written in Notepad. It changes a few bytes in the game: a number, or an
@@ -28,8 +28,9 @@ Dead Space 3\
 
 What players get:
 - **A new mod is off.** The first start after it is dropped in adds `hello_mod=0` under `[modules]` in
-  `ds3_mods.ini`. The player switches it on in the panel (or in the file), and it loads on the next start. A DLL
-  without a `mod.ini` is never loaded.
+  `ds3_mods.ini`. The player switches it on in the panel (or in the file), and it loads on the next start. A `.dll`
+  without a `mod.ini` is never loaded. A plain `.asi` without one is listed as a basic mod (see "Moving an existing
+  ASI here").
 - **Problems are logged.** A manifest that can't be used is written to `ds3_mods.log` and the mod is skipped; a bad
   setting is logged and ignored (a value out of range is clamped to it). A crash in your `DS3ModInit` or your frame
   callback is caught and logged, but a crash in a thread or hook of your own can still stop the game. Check the log
@@ -127,7 +128,7 @@ Kinds:
   step through F1-F12, Insert, Delete, Home, End, Page Up and Page Down. It is written as a hex virtual-key code
   (`0x7B` = F12). `default=` takes `F12`, a letter or digit, `none`, or a code.
 
-Limits, so the panel stays usable: 16 mods, 24 settings per mod, 128 settings over all mods. Labels are cut to 47
+Limits, so the panel stays usable: 32 mods, 24 settings per mod, 128 settings over all mods. Labels are cut to 47
 characters, help lines to 159, and text is shown in ASCII only (other characters become `?`).
 
 ## Patch mods
@@ -673,6 +674,13 @@ only works if mods keep to it. The loader never looks online for updates, and a 
 versions where they got the first one.
 
 ## Moving an existing ASI here
+
+Since loader 1.1.0 a plain `.asi` loads without any of this: dropped into `plugins\` (or into a folder of its own
+there) it is listed in the Mods panel under "Basic mods", off until switched on. A `mod.ini` is what gives it a
+proper name, a description, settings in the panel and a place in the update rules, so it is still worth adding.
+Either way the loader's safe start covers it: after a start that does not finish, the next start loads no mods.
+If the loader can't write `ds3_mods_start.ini` in the game folder, a basic mod is not loaded at all, and a mod
+with a `mod.ini` loads without this protection.
 
 An ASI built for an ASI loader usually works unchanged: put it in its own folder with a `mod.ini` that names it in
 `file=`. It loads after the game's code is decrypted, which is later than an ASI loader would load it. Most ASIs

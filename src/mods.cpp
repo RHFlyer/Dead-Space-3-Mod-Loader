@@ -5,7 +5,9 @@
 #include "input.h"
 #include "log.h"
 #include "patches.h"
+#include "pefile.h"
 #include "sdk.h"
+#include "startguard.h"
 #include "version.h"
 
 #include "../sdk/ds3mod.h"
@@ -16,6 +18,8 @@
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
+
+#include <tlhelp32.h>
 
 namespace {
 
@@ -29,6 +33,12 @@ int g_settingCount = 0;
 DS3ModHost g_hosts[kMaxMods] = {};
 wchar_t g_gameDir[MAX_PATH] = {};
 wchar_t g_sealsIni[MAX_PATH] = {};
+wchar_t g_pluginsDir[MAX_PATH] = {};
+// What the file reader found for a basic mod, by mod index.
+char g_sha[kMaxMods][65] = {};
+unsigned long long g_fileSize[kMaxMods] = {};
+bool g_safeStart = false;      // this start loads no mod (startguard.h)
+char g_otherLoader[48] = {};   // file name of another ASI loader in the game, or empty
 
 // ---- Text ----
 
@@ -674,39 +684,11 @@ bool FileSettled(const wchar_t* path)
     return true;
 }
 
-// Kept apart so __try is allowed. `base` is a DLL mapped as an image (not run).
-bool ImageExports(const uint8_t* base, const char* name)
-{
-    __try {
-        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-        if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
-        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
-        if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC)
-            return false;
-        const IMAGE_DATA_DIRECTORY& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-        const DWORD imageSize = nt->OptionalHeader.SizeOfImage;
-        if (!dir.VirtualAddress || dir.VirtualAddress >= imageSize) return false;
-        const auto* exp = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(base + dir.VirtualAddress);
-        if (exp->AddressOfNames >= imageSize) return false;
-        const auto* names = reinterpret_cast<const DWORD*>(base + exp->AddressOfNames);
-        for (DWORD i = 0; i < exp->NumberOfNames && i < 4096; ++i) {
-            if (names[i] < imageSize && strcmp(reinterpret_cast<const char*>(base + names[i]), name) == 0) return true;
-        }
-        return false;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
-
-// Whether the DLL file exports `name`, read without running any of its code.
+// Whether the DLL file exports `name`, read from the file's own bytes without mapping or running it.
 bool FileExports(const wchar_t* file, const char* name)
 {
-    HMODULE h = LoadLibraryExW(file, nullptr, LOAD_LIBRARY_AS_IMAGE_RESOURCE | LOAD_LIBRARY_AS_DATAFILE);
-    if (!h) return false;
-    const auto* base = reinterpret_cast<const uint8_t*>(reinterpret_cast<uintptr_t>(h) & ~static_cast<uintptr_t>(3));
-    const bool found = ImageExports(base, name);
-    FreeLibrary(h);
-    return found;
+    PeFile pe(file);
+    return pe.Exports(name);
 }
 
 // %TEMP%\ds3mods, made on first use; copies left from earlier games are deleted then (a locked one is skipped).
@@ -742,27 +724,224 @@ void ReadIniStamp(int i)
     g_hot[i].iniKnown = m.ini[0] && FileStamp(m.ini, &g_hot[i].iniTime, nullptr);
 }
 
+// ---- Basic mods: discovery ----
+
+struct FileName {
+    wchar_t name[64];
+};
+
+bool ByName(const FileName& a, const FileName& b)
+{
+    return _wcsicmp(a.name, b.name) < 0;
+}
+
+bool HasManifest(const wchar_t* folder)
+{
+    wchar_t dir[MAX_PATH], manifest[MAX_PATH];
+    return JoinPath(dir, g_pluginsDir, folder) && JoinPath(manifest, dir, L"mod.ini") &&
+           GetFileAttributesW(manifest) != INVALID_FILE_ATTRIBUTES;
+}
+
+// A path that can be an ini key and be shown in the panel's ASCII font.
+bool PlainName(const wchar_t* s)
+{
+    if (!s[0] || s[0] == L';' || s[0] == L'[' || s[0] == L' ') return false;
+    const wchar_t* last = s;
+    for (; *s; ++s) {
+        if (*s < 0x20 || *s > 0x7E || *s == L'=') return false;
+        last = s;
+    }
+    return *last != L' ';
+}
+
+const wchar_t* BaseName(const wchar_t* path)
+{
+    const wchar_t* slash = wcsrchr(path, L'\\');
+    return slash ? slash + 1 : path;
+}
+
+bool IsReserved(const char* id, const char* const* reserved)
+{
+    for (const char* const* r = reserved; *r; ++r) {
+        if (strcmp(*r, id) == 0) return true;
+    }
+    return false;
+}
+
+// The basic mod's [basic_mods] switch: read, and added as off when the file is new.
+void ReadBasicSwitch(Mod& m)
+{
+    wchar_t text[16];
+    Read(g_sealsIni, L"basic_mods", m.switchKey, text, 16);
+    if (!text[0]) {
+        WritePrivateProfileStringW(L"basic_mods", m.switchKey, L"0", g_sealsIni);
+        Log("mods: new basic mod \"%s\" (plugins\\%ls) found; added [basic_mods] %ls=0, switch it on in the Mods panel",
+            m.name, m.switchKey, m.switchKey);
+    }
+    static const wchar_t* const kOn[] = {L"1", L"true", L"yes", L"on", nullptr};
+    m.enabled = m.startup = IsAny(text, kOn);
+}
+
+// One .asi with no mod.ini: `folder` is its folder inside plugins\, or empty for a loose file.
+void AddBasicMod(const wchar_t* folder, const wchar_t* fileName, const char* const* reserved)
+{
+    wchar_t rel[MAX_PATH];
+    if (folder[0]) {
+        if (!JoinPath(rel, folder, fileName)) return;
+    } else {
+        wcscpy_s(rel, fileName);
+    }
+    if (g_modCount >= kMaxMods) {
+        Log("mods: more than %d mods; plugins\\%ls is not listed", kMaxMods, rel);
+        return;
+    }
+    if (wcslen(rel) >= 128 || !PlainName(rel)) {
+        Log("mods: plugins\\%ls can't be listed: its name (and its folder's) must be plain letters, digits and simple "
+            "punctuation without '=', under 128 characters in all. Rename it", rel);
+        return;
+    }
+    Mod& m = g_mods[g_modCount];
+    m = {};
+    m.basic = true;
+    wcsncpy_s(m.folder, folder, _TRUNCATE);
+    wcscpy_s(m.switchKey, rel);
+    const bool placed = JoinPath(m.file, g_pluginsDir, rel) &&
+                        (folder[0] ? JoinPath(m.dir, g_pluginsDir, folder) : wcscpy_s(m.dir, g_pluginsDir) == 0);
+    if (!placed) {
+        Log("mods: plugins\\%ls: path too long; skipped", rel);
+        return;
+    }
+
+    wchar_t base[64] = {};
+    wcsncpy_s(base, fileName, wcslen(fileName) - 4);  // without ".asi"
+    ToAscii(base, m.name, sizeof(m.name));
+    if (!m.name[0]) strcpy_s(m.name, "(no name)");
+    // A name for log lines, made unique. It is never a key: the switch is keyed by the path.
+    char stem[24];
+    IdFromFolder(base, stem, sizeof(stem));
+    if (!stem[0]) strcpy_s(stem, "basic");
+    strcpy_s(m.id, stem);
+    for (int n = 2; n < 100 && (ModIdTaken(m.id) || IsReserved(m.id, reserved)); ++n) sprintf_s(m.id, "%s_%d", stem, n);
+    for (int i = 0; m.id[i]; ++i) m.idW[i] = static_cast<wchar_t>(m.id[i]);
+
+    PeFile pe(m.file);
+    g_fileSize[g_modCount] = pe.Size();
+    pe.Sha256(g_sha[g_modCount]);
+    if (!pe.Read()) {
+        strcpy_s(m.problem, "can't be read");
+        Log("mods: basic mod \"%s\" (plugins\\%ls) can't be read (missing, empty, in use, or over %llu MB); not loaded",
+            m.name, rel, PeFile::kMaxBytes >> 20);
+    } else if (!pe.X86Dll()) {
+        strcpy_s(m.problem, "not a 32-bit DLL: can't load");
+        Log("mods: basic mod \"%s\" (plugins\\%ls) is not a 32-bit DLL (a 64-bit build, or not a DLL at all); Dead "
+            "Space 3 is a 32-bit game, so it can't be loaded", m.name, rel);
+    } else if (pe.Exports("DS3ModInit")) {
+        strcpy_s(m.problem, "needs its mod.ini");
+        Log("mods: basic mod \"%s\" (plugins\\%ls) is a DS3 Mod Loader mod without its mod.ini; copy the mod's whole "
+            "folder into plugins\\. Not loaded", m.name, rel);
+    }
+
+    // The same file name as a mod with a mod.ini: maybe a second copy of it. Only a suspicion, so it is still listed.
+    for (int i = 0; i < g_modCount; ++i) {
+        const Mod& other = g_mods[i];
+        if (other.basic || !other.file[0] || _wcsicmp(BaseName(other.file), fileName) != 0) continue;
+        _snprintf_s(m.description, _TRUNCATE, "May be a second copy of %s: use one of the two.", other.name);
+        Log("mods: basic mod \"%s\" (plugins\\%ls) has the same file name as the mod \"%s\" (plugins\\%ls): it may be "
+            "a second copy. Use one of the two", m.name, rel, other.name, other.folder);
+        break;
+    }
+    ReadBasicSwitch(m);
+    ++g_modCount;
+}
+
+// Every .asi directly inside a folder that has no mod.ini.
+void AddBasicModsIn(const wchar_t* folder, const char* const* reserved)
+{
+    constexpr int kMaxPerFolder = 8;
+    FileName files[kMaxPerFolder];
+    int count = 0;
+    wchar_t dir[MAX_PATH], pattern[MAX_PATH];
+    if (!JoinPath(dir, g_pluginsDir, folder) || !JoinPath(pattern, dir, L"*.asi")) {
+        Log("mods: plugins\\%ls: path too long; skipped", folder);
+        return;
+    }
+    WIN32_FIND_DATAW fd{};
+    HANDLE find = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+    if (find != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            if (!EndsWith(fd.cFileName, L".asi")) continue;  // "*.asi" also matches longer endings (8.3 names)
+            if (wcslen(fd.cFileName) >= 64)
+                Log("mods: plugins\\%ls\\%ls: file name too long; skipped", folder, fd.cFileName);
+            else if (count < kMaxPerFolder)
+                wcscpy_s(files[count++].name, fd.cFileName);
+            else
+                Log("mods: plugins\\%ls: more than %d .asi files; %ls is not listed", folder, kMaxPerFolder, fd.cFileName);
+        } while (FindNextFileW(find, &fd));
+        FindClose(find);
+    }
+    if (!count) {
+        Log("mods: plugins\\%ls has no mod.ini and no .asi file; nothing to load there", folder);
+        return;
+    }
+    std::sort(files, files + count, ByName);
+    for (int i = 0; i < count; ++i) AddBasicMod(folder, files[i].name, reserved);
+}
+
+// Consent follows the file: a [basic_mods] line whose file is gone (or now belongs to a mod with a mod.ini) is
+// removed, so a different file put there later starts switched off.
+void PruneBasicSwitches()
+{
+    static wchar_t block[16384];
+    const DWORD n = GetPrivateProfileSectionW(L"basic_mods", block, _countof(block), g_sealsIni);
+    if (n == 0 || n >= _countof(block) - 2) return;
+    for (const wchar_t* p = block; *p; p += wcslen(p) + 1) {
+        const wchar_t* eq = wcschr(p, L'=');
+        if (!eq || eq == p || eq - p >= 128) continue;
+        wchar_t key[128], path[MAX_PATH], folder[128];
+        wcsncpy_s(key, p, static_cast<size_t>(eq - p));
+        Trim(key);
+        bool listed = false;
+        for (int i = 0; i < g_modCount && !listed; ++i)
+            listed = g_mods[i].basic && _wcsicmp(g_mods[i].switchKey, key) == 0;
+        if (listed) continue;
+        if (!SafeRelative(key) || !JoinPath(path, g_pluginsDir, key)) continue;
+        wcscpy_s(folder, key);
+        wchar_t* slash = wcsrchr(folder, L'\\');
+        if (slash) *slash = L'\0';
+        const bool there = GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
+        if (there && !(slash && HasManifest(folder))) continue;  // there, but over a limit this time: keep its switch
+        WritePrivateProfileStringW(L"basic_mods", key, nullptr, g_sealsIni);
+        Log("mods: [basic_mods] %ls removed: %s", key,
+            there ? "its folder now has a mod.ini, which decides" : "that file is gone (a file put there later starts off)");
+    }
+}
+
 }  // namespace
 
 void DiscoverMods(const wchar_t* moduleDir, const wchar_t* sealsIni, const char* const* reserved)
 {
     wcscpy_s(g_gameDir, moduleDir);
     wcscpy_s(g_sealsIni, sealsIni);
-    wchar_t plugins[MAX_PATH], pattern[MAX_PATH];
-    if (!JoinPath(plugins, moduleDir, L"plugins") || !JoinPath(pattern, plugins, L"*")) {
+    wchar_t pattern[MAX_PATH];
+    if (!JoinPath(g_pluginsDir, moduleDir, L"plugins") || !JoinPath(pattern, g_pluginsDir, L"*")) {
         Log("mods: the game folder's path is too long; no drop-in mods");
         return;
     }
 
-    struct Folder {
-        wchar_t name[64];
-    };
-    static Folder folders[kMaxFolders];
-    int count = 0;
+    static FileName folders[kMaxFolders], loose[kMaxFolders];
+    static bool bare[kMaxFolders];  // a folder without a mod.ini
+    int count = 0, looseCount = 0;
     WIN32_FIND_DATAW fd{};
     HANDLE find = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
     if (find == INVALID_HANDLE_VALUE) {
-        Log("mods: no plugins folder; no drop-in mods");
+        const DWORD error = GetLastError();
+        if (error == ERROR_PATH_NOT_FOUND || error == ERROR_FILE_NOT_FOUND) {
+            Log("mods: no plugins folder; no drop-in mods");
+            PruneBasicSwitches();  // the folder is gone, and with it every file a [basic_mods] line stood for
+        } else {
+            Log("mods: the plugins folder could not be read (error %lu); no drop-in mods this time", error);
+        }
         return;
     }
     do {
@@ -774,21 +953,38 @@ void DiscoverMods(const wchar_t* moduleDir, const wchar_t* sealsIni, const char*
                 wcscpy_s(folders[count++].name, fd.cFileName);
             }
         } else if (EndsWith(fd.cFileName, L".asi")) {
-            Log("mods: plugins\\%ls is not in a folder with a mod.ini; not loaded (see the README)", fd.cFileName);
+            if (wcslen(fd.cFileName) >= 64)
+                Log("mods: plugins\\%ls: file name too long; skipped", fd.cFileName);
+            else if (looseCount < kMaxFolders)
+                wcscpy_s(loose[looseCount++].name, fd.cFileName);
+        } else if (EndsWith(fd.cFileName, L".dll")) {
+            Log("mods: plugins\\%ls is a .dll, so it is not listed. If its maker says it is an ASI mod, rename it to end "
+                "in .asi, or give it a folder with a mod.ini (see the README)", fd.cFileName);
         }
     } while (FindNextFileW(find, &fd));
     FindClose(find);
 
-    std::sort(folders, folders + count,
-              [](const Folder& a, const Folder& b) { return _wcsicmp(a.name, b.name) < 0; });
+    std::sort(folders, folders + count, ByName);
+    std::sort(loose, loose + looseCount, ByName);
+    // Mods with a mod.ini first, so they keep their place if the limit is reached.
     for (int i = 0; i < count; ++i) {
+        bare[i] = !HasManifest(folders[i].name);
+        if (bare[i]) continue;
         if (g_modCount >= kMaxMods) {
             Log("mods: more than %d mods; plugins\\%ls and later folders are skipped", kMaxMods, folders[i].name);
             break;
         }
-        ParseMod(plugins, folders[i].name, reserved);
+        ParseMod(g_pluginsDir, folders[i].name, reserved);
     }
-    Log("mods: %d drop-in mod(s) found, %d setting(s) for the panel", g_modCount, g_settingCount);
+    const int withManifest = g_modCount;
+    // Basic mods: loose .asi files, then the .asi files of folders without a mod.ini.
+    for (int i = 0; i < looseCount; ++i) AddBasicMod(L"", loose[i].name, reserved);
+    for (int i = 0; i < count; ++i) {
+        if (bare[i]) AddBasicModsIn(folders[i].name, reserved);
+    }
+    PruneBasicSwitches();
+    Log("mods: %d drop-in mod(s) and %d basic mod(s) found, %d setting(s) for the panel", withManifest,
+        g_modCount - withManifest, g_settingCount);
 }
 
 namespace {
@@ -976,9 +1172,40 @@ void ReloadIni(int i)
         m.settingsChanged ? ", the mod was told" : "");
 }
 
+// A notice from the moment the mods load, kept up for the first while of drawn frames. Timed from when it is set it
+// would be gone before the first menu: the game has not drawn anything yet then (seen in game: the safe-start notice
+// was never visible).
+char g_startNotice[128] = {};
+bool g_startNoticeBad = false;
+ULONGLONG g_startNoticeMs = 0;
+
+void SetStartNotice(const char* text, bool bad, ULONGLONG ms)
+{
+    strncpy_s(g_startNotice, text, _TRUNCATE);
+    g_startNoticeBad = bad;
+    g_startNoticeMs = ms;
+    SdkWantFrames();  // it is shown from the frame tick, which is only installed when something asks for it
+}
+
+void StartNoticeTick(ULONGLONG now)
+{
+    if (!g_startNotice[0]) return;
+    static ULONGLONG first = 0, last = 0;
+    if (!first) first = now;
+    if (now - first >= g_startNoticeMs) {
+        g_startNotice[0] = '\0';
+        return;
+    }
+    if (now - last < 1000) return;  // a notice stays a few seconds: showing it again each second keeps it up
+    last = now;
+    SdkNotice(g_startNotice, g_startNoticeBad);
+}
+
 void HotReloadTick()
 {
+    StartGuardFrame();
     const ULONGLONG now = GetTickCount64();
+    StartNoticeTick(now);
     for (int i = 0; i < g_modCount; ++i) {
         if (g_hot[i].phase == HotPhase::Draining) StepDrain(i, now);
     }
@@ -1020,15 +1247,285 @@ void HotReloadTick()
     }
 }
 
+// ---- Basic mods: loading ----
+
+unsigned long long MsSinceGameStart()
+{
+    FILETIME created{}, exited{}, kernel{}, user{}, now{};
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return 0;
+    GetSystemTimeAsFileTime(&now);
+    const unsigned long long a = (static_cast<unsigned long long>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+    const unsigned long long b = (static_cast<unsigned long long>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+    return b > a ? (b - a) / 10000 : 0;
+}
+
+// Kept apart so __try is allowed. An exception caught here is diagnosis, not containment: after one the game may
+// not be stable, and what protects the player is the safe start.
+HMODULE LoadRaw(const wchar_t* file, DWORD* error)
+{
+    __try {
+        HMODULE dll = LoadLibraryExW(file, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        *error = dll ? 0 : GetLastError();
+        return dll;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *error = GetExceptionCode();
+        return nullptr;
+    }
+}
+
+struct Missing {
+    const wchar_t* dir;
+    char text[200];
+};
+
+// An import of a file that did not load: noted if it is neither loaded, beside the mod, nor found by Windows.
+bool NoteMissing(const char* name, void* user)
+{
+    auto* miss = static_cast<Missing*>(user);
+    if (_strnicmp(name, "api-ms-", 7) == 0 || _strnicmp(name, "ext-ms-", 7) == 0) return true;
+    wchar_t wide[128], path[MAX_PATH], found[MAX_PATH];
+    size_t k = 0;
+    for (; name[k] && k + 1 < 128; ++k) wide[k] = static_cast<unsigned char>(name[k]);
+    wide[k] = L'\0';
+    if (GetModuleHandleW(wide)) return true;
+    if (JoinPath(path, miss->dir, wide) && GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) return true;
+    if (SearchPathW(nullptr, wide, nullptr, MAX_PATH, found, nullptr)) return true;
+    if (strlen(miss->text) + strlen(name) + 3 < sizeof(miss->text)) {
+        if (miss->text[0]) strcat_s(miss->text, ", ");
+        strcat_s(miss->text, name);
+    }
+    return true;
+}
+
+void LoadBasicMod(int i)
+{
+    Mod& m = g_mods[i];
+    if (GetModuleHandleW(m.file)) {
+        strcpy_s(m.notLoaded, "already loaded");
+        Log("basic mod %s: plugins\\%ls is already in the game (something else loaded it); left as it is and not "
+            "started again", m.id, m.switchKey);
+        return;
+    }
+    DWORD error = 0;
+    HMODULE dll = LoadRaw(m.file, &error);
+    if (!dll) {
+        if (error == ERROR_BAD_EXE_FORMAT) {
+            Log("basic mod %s: FAILED to load plugins\\%ls: not a valid 32-bit DLL (error 193)", m.id, m.switchKey);
+        } else if (error == ERROR_MOD_NOT_FOUND) {
+            Missing miss{m.dir, {}};
+            PeFile pe(m.file);
+            pe.Imports(&NoteMissing, &miss);
+            Log("basic mod %s: FAILED to load plugins\\%ls: this file, or a DLL it needs, was not found (error 126)%s%s",
+                m.id, m.switchKey, miss.text[0] ? ". Not beside it or in Windows: " : "", miss.text);
+        } else if (error == ERROR_DLL_INIT_FAILED) {
+            Log("basic mod %s: FAILED to load plugins\\%ls: its own start-up code failed or crashed (error 1114)", m.id,
+                m.switchKey);
+        } else if (error >= 0xC0000000u) {
+            Log("basic mod %s: plugins\\%ls crashed while starting (exception 0x%08lX, caught). The game may not be "
+                "stable until it is restarted", m.id, m.switchKey, error);
+        } else {
+            Log("basic mod %s: FAILED to load plugins\\%ls (error %lu)", m.id, m.switchKey, error);
+        }
+        return;
+    }
+    m.loaded = true;
+    g_hot[i].dll = dll;
+    Log("basic mod %s: loaded plugins\\%ls at %p (%llu bytes, SHA-256 %s), %llu ms after the game started. A plain "
+        "ASI: the loader's hook and patch checks don't cover it", m.id, m.switchKey, dll, g_fileSize[i], g_sha[i],
+        MsSinceGameStart());
+    // Ultimate ASI Loader's convention: an exported InitializeASI is called once after the load.
+    if (auto init = reinterpret_cast<void(__cdecl*)()>(GetProcAddress(dll, "InitializeASI"))) {
+        if (CallChanged(init))
+            Log("basic mod %s: InitializeASI called", m.id);
+        else
+            Log("basic mod %s: InitializeASI crashed (caught); the mod may not work", m.id);
+    }
+}
+
+// Other DLLs in the game that load mods or stand in for a system DLL. An ASI loader is known by its own marker
+// export, whatever its file is called.
+void FindOtherLoaders()
+{
+    static const wchar_t* const kProxyNames[] = {
+        L"d3d8.dll",   L"d3d9.dll",    L"d3d10.dll",  L"d3d11.dll",     L"d3d12.dll",     L"dxgi.dll",
+        L"ddraw.dll",  L"dinput.dll",  L"dsound.dll", L"version.dll",   L"winmm.dll",     L"wininet.dll",
+        L"winhttp.dll", L"msacm32.dll", L"msvfw32.dll", L"xinput1_1.dll", L"xinput1_2.dll", L"xinput1_3.dll",
+        L"xinput1_4.dll", L"xinput9_1_0.dll", L"binkw32.dll", L"bink2w32.dll", L"vorbisfile.dll", L"xlive.dll",
+        nullptr};
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+    if (snap == INVALID_HANDLE_VALUE) {
+        Log("mods: the game's loaded DLLs could not be listed (error %lu), so another ASI loader would go unnoticed",
+            GetLastError());
+        return;
+    }
+    int looked = 0;
+    MODULEENTRY32W me{};
+    me.dwSize = sizeof(me);
+    const size_t dirLen = wcslen(g_gameDir);
+    for (BOOL ok = Module32FirstW(snap, &me); ok; ok = Module32NextW(snap, &me)) {
+        ++looked;
+        if (GetProcAddress(me.hModule, "IsUltimateASILoader")) {
+            ToAscii(me.szModule, g_otherLoader, sizeof(g_otherLoader));
+            Log("mods: Ultimate ASI Loader is also in the game (%ls). It loads .asi files by itself, switched on in "
+                "the Mods panel or not, so basic mods are left to it and hot reload is off. Using both loaders "
+                "together is not supported: remove one", me.szExePath);
+            continue;
+        }
+        const bool inGameDir = _wcsnicmp(me.szExePath, g_gameDir, dirLen) == 0 && me.szExePath[dirLen] == L'\\' &&
+                               !wcschr(me.szExePath + dirLen + 1, L'\\');
+        if (inGameDir && _wcsicmp(me.szModule, L"dinput8.dll") != 0 && IsAny(me.szModule, kProxyNames))
+            Log("mods: another DLL with a system DLL's name is loaded from the game folder: %ls (not an ASI loader, "
+                "as far as this loader can tell)", me.szModule);
+    }
+    CloseHandle(snap);
+    if (!g_otherLoader[0]) Log("mods: no other ASI loader among the %d DLLs loaded in the game", looked);
+}
+
+int CountAsi(const wchar_t* dir)
+{
+    wchar_t pattern[MAX_PATH];
+    if (!JoinPath(pattern, dir, L"*.asi")) return 0;
+    int n = 0;
+    WIN32_FIND_DATAW fd{};
+    HANDLE find = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+    if (find == INVALID_HANDLE_VALUE) return 0;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && EndsWith(fd.cFileName, L".asi")) ++n;
+    } while (FindNextFileW(find, &fd));
+    FindClose(find);
+    return n;
+}
+
+// .asi files where another ASI loader would look, but this one does not.
+void NoteOtherPlaces()
+{
+    if (g_otherLoader[0]) return;
+    wchar_t scripts[MAX_PATH];
+    const int inScripts = JoinPath(scripts, g_gameDir, L"scripts") ? CountAsi(scripts) : 0;
+    const int inRoot = CountAsi(g_gameDir);
+    if (!inScripts && !inRoot) return;
+    Log("mods: %d .asi file(s) in scripts\\ and %d in the game folder itself are not loaded: this loader only looks in "
+        "plugins\\. Move them there to use them", inScripts, inRoot);
+    SetStartNotice(".asi files in scripts\\ or the game folder are not loaded: move them into plugins\\", true, 30000);
+}
+
+// Whether mod i would be loaded on a normal start.
+bool Wanted(int i)
+{
+    const Mod& m = g_mods[i];
+    return m.enabled && !m.needsLoader && !m.problem[0] && !(m.basic && g_otherLoader[0]);
+}
+
+// The mod's line in the start journal: its key and its file's SHA-256 (empty for a patch-only mod).
+void GuardEntry(int i, wchar_t* key, size_t keySize, char sha[65])
+{
+    const Mod& m = g_mods[i];
+    sha[0] = '\0';
+    if (m.basic) {
+        swprintf_s(key, keySize, L"basic:%s", m.switchKey);
+        strcpy_s(sha, 65, g_sha[i]);
+    } else {
+        swprintf_s(key, keySize, L"mod:%s", m.idW);
+        if (m.file[0]) {
+            PeFile pe(m.file);
+            pe.Sha256(sha);
+        }
+    }
+}
+
 }  // namespace
 
 void LoadMods()
 {
     g_hotOn = GetPrivateProfileIntW(L"mods", L"hot_reload", 1, g_sealsIni) != 0;
     g_hotFree = GetPrivateProfileIntW(L"mods", L"hot_reload_free", 0, g_sealsIni) != 0;
+    SdkSetFrameTick(&HotReloadTick);  // it also counts frames for the safe start
+
+    FindOtherLoaders();
+    const bool hotWasOn = g_hotOn;
+    if (g_otherLoader[0]) g_hotOn = false;  // no mod runs from a temp copy while another loader may load the original
+
+    wchar_t key[160];
+    char sha[65];
+    const StartKind start = StartGuardBegin(g_gameDir, g_sealsIni);
+    if (start == StartKind::Safe) {
+        // No mod, no patch. The panel shows which switched-on mods are new or changed since the last good start.
+        g_safeStart = true;
+        for (int i = 0; i < g_modCount; ++i) {
+            Mod& m = g_mods[i];
+            if (!Wanted(i)) continue;
+            GuardEntry(i, key, _countof(key), sha);
+            m.changed = !StartGuardKnown(key, sha);
+            Log("safe start: \"%s\" is on and was not loaded%s", m.name,
+                m.changed ? "; it is new or changed since the last start that finished" : "");
+        }
+        if (StartGuardStuck())
+            SetStartNotice("Safe start, and the next start will be one too: a settings file is read-only (see ds3_mods.log).",
+                           true, 30000);
+        else
+            SetStartNotice(StartGuardAsked() ? "Safe start: no mods were loaded this time."
+                                             : "The last start did not finish: no mods were loaded this time. See the Mods panel.",
+                           !StartGuardAsked(), 30000);
+        return;
+    }
+
+    // The journal: what this start is about to load. Nothing to load, nothing to guard.
+    int wanted = 0;
+    bool journal = false;
+    if (start == StartKind::Normal) {
+        for (int i = 0; i < g_modCount; ++i) {
+            if (!Wanted(i)) continue;
+            GuardEntry(i, key, _countof(key), sha);
+            StartGuardAdd(key, sha);
+            ++wanted;
+        }
+        if (wanted > 0)
+            journal = StartGuardCommit();
+        else
+            StartGuardNoMods();
+    }
+
+    // Basic mods first: a mod that goes through the SDK then sees what they changed and is refused cleanly.
+    int basicLoaded = 0;
+    char names[200] = {};
+    for (int i = 0; i < g_modCount; ++i) {
+        Mod& m = g_mods[i];
+        if (!m.basic || m.problem[0]) continue;  // a problem was logged when the file was found
+        if (!m.enabled) {
+            Log("basic mod %s: off", m.id);
+            continue;
+        }
+        if (g_otherLoader[0]) {
+            strcpy_s(m.notLoaded, "left to the other loader");
+            Log("basic mod %s: on, but left to %s (plugins\\%ls is %s)", m.id, g_otherLoader, m.switchKey,
+                GetModuleHandleW(m.file) ? "in the game, loaded by it" : "not in the game now");
+            continue;
+        }
+        if (start == StartKind::OtherGame) {
+            strcpy_s(m.notLoaded, "another game is starting");
+            Log("basic mod %s: on, but not loaded: another Dead Space 3 is still starting", m.id);
+            continue;
+        }
+        if (!journal) {
+            strcpy_s(m.notLoaded, "start journal not saved");
+            Log("basic mod %s: on, but not loaded: without ds3_mods_start.ini a start that does not finish could not "
+                "be noticed. Make the game folder writable", m.id);
+            continue;
+        }
+        LoadBasicMod(i);
+        if (!m.loaded) continue;
+        ++basicLoaded;
+        if (strlen(names) + strlen(m.name) + 3 < sizeof(names)) {
+            if (names[0]) strcat_s(names, ", ");
+            strcat_s(names, m.name);
+        }
+    }
+    if (basicLoaded) Log("mods: %d basic mod(s) loaded: %s", basicLoaded, names);
+
     bool anyReloadable = false;
     for (int i = 0; i < g_modCount; ++i) {
         Mod& m = g_mods[i];
+        if (m.basic) continue;
         if (m.needsLoader) continue;  // said so when it was found
         if (!m.enabled) {
             Log("mod %s: off", m.id);
@@ -1051,8 +1548,10 @@ void LoadMods()
         ReadIniStamp(i);
         anyReloadable = anyReloadable || g_hot[i].reloadable;
     }
-    SdkSetFrameTick(&HotReloadTick);
-    if (!g_hotOn) Log("mods: hot reload off ([mods] hot_reload=0)");
+    if (journal) SdkWantFrames();  // the safe start counts drawn frames, with or without an SDK mod
+    NoteOtherPlaces();
+    if (g_otherLoader[0] && hotWasOn) Log("mods: hot reload off while another ASI loader is in the game");
+    else if (!g_hotOn) Log("mods: hot reload off ([mods] hot_reload=0)");
     else if (anyReloadable) Log("mods: hot reload on: a new build of a mod marked so above is loaded while the game runs");
 }
 
@@ -1063,6 +1562,10 @@ bool ModIdTaken(const char* id)
     }
     return false;
 }
+
+bool ModsSafeStart() { return g_safeStart; }
+bool ModsSafeStartAsked() { return g_safeStart && StartGuardAsked(); }
+const char* ModsOtherLoader() { return g_otherLoader; }
 
 int ModCount() { return g_modCount; }
 Mod& ModAt(int i) { return g_mods[i]; }
@@ -1082,7 +1585,8 @@ bool ModSettingAppliesLive(const ModSetting& s)
 
 bool WriteModSwitch(Mod& m)
 {
-    return WritePrivateProfileStringW(L"modules", m.idW, m.enabled ? L"1" : L"0", g_sealsIni) != FALSE;
+    return WritePrivateProfileStringW(m.basic ? L"basic_mods" : L"modules", m.basic ? m.switchKey : m.idW,
+                                      m.enabled ? L"1" : L"0", g_sealsIni) != FALSE;
 }
 
 bool WriteModSetting(ModSetting& s)

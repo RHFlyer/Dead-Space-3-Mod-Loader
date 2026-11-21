@@ -28,6 +28,7 @@ constexpr int kLoggedResourceSets = 10;  // per mod; then one "no longer logged"
 
 const DS3ModHost* g_hostOf[kMaxMods] = {};
 bool g_anyHost = false;
+bool g_wantFrames = false;  // the loader itself needs the frame tick and notices (safe start, basic mods)
 
 struct FrameCallback {
     DS3FrameFn volatile fn;
@@ -125,9 +126,10 @@ bool g_reloadable[kMaxMods] = {};  // runs from a temp copy and can be unloaded:
 
 // A notice the proxy draws for a few seconds (hot reload results).
 char g_notice[128] = {};
-DWORD g_noticeAt = 0;
+ULONGLONG g_noticeAt = 0;
+bool g_noticeOn = false;
 bool g_noticeBad = false;
-constexpr DWORD kNoticeMs = 4000;
+constexpr ULONGLONG kNoticeMs = 4000;
 
 struct HookRecord;
 void* __stdcall HotEnterC(HookRecord* r, void** slot);
@@ -662,7 +664,7 @@ void RunFrames(OverlayModCanvas& canvas)
     g_canvas = nullptr;
 
     // The hot-reload notice, top left, over the mods.
-    if (g_noticeAt && GetTickCount() - g_noticeAt < kNoticeMs) {
+    if (g_noticeOn && GetTickCount64() - g_noticeAt < kNoticeMs) {
         canvas.ResetTextSize();
         const float lh = canvas.LineHeight() > 0 ? canvas.LineHeight() : canvas.SetTextSize(f.height / 54.0f);
         const float x = lh, y = lh;
@@ -696,7 +698,12 @@ void SdkFillHost(DS3ModHost& host, int modIndex)
 
 bool SdkWanted()
 {
-    return g_anyHost;
+    return g_anyHost || g_wantFrames;
+}
+
+void SdkWantFrames()
+{
+    g_wantFrames = true;
 }
 
 void SdkSetReloadable(int mi, bool reloadable)
@@ -783,7 +790,8 @@ void SdkNotice(const char* text, bool bad)
 {
     strncpy_s(g_notice, text, _TRUNCATE);
     g_noticeBad = bad;
-    g_noticeAt = GetTickCount() | 1;
+    g_noticeAt = GetTickCount64();
+    g_noticeOn = true;
 }
 
 void SdkSetFrameTick(void (*tick)())
@@ -793,7 +801,7 @@ void SdkSetFrameTick(void (*tick)())
 
 void InstallSdk()
 {
-    if (!g_anyHost) return;
+    if (!g_anyHost && !g_wantFrames) return;
     if (!OverlayInstalled()) {
         Log("mods: the overlay is not installed, so frame callbacks will not run (see the overlay lines above)");
         return;

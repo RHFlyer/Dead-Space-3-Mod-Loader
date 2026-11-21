@@ -8,8 +8,10 @@
 
 // Fills the API 2 fields of mod `modIndex`'s host (its modId must already be set).
 void SdkFillHost(DS3ModHost& host, int modIndex);
-// Whether any DLL mod got a host: the overlay is then installed for their frame callbacks.
+// Whether any DLL mod got a host, or the loader asked for frames: the overlay is then installed for them.
 bool SdkWanted();
+// The loader itself wants the frame tick and notices, with or without a DLL mod (before InstallOverlay).
+void SdkWantFrames();
 // After InstallOverlay: runs the mods' frame callbacks from the overlay. Logs if the overlay is not there.
 void InstallSdk();
 

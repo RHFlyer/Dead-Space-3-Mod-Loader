@@ -7,8 +7,14 @@
 // A manifest that cannot be used is logged and skipped. A mod whose [mod] min_loader= is newer than this loader is
 // listed (so the panel can say what it needs) but its settings, patches and DLL are left alone. Everything here runs on one thread at a time: discovery and
 // loading on the game's first DirectInput8Create, the panel's reads and writes on the render thread afterwards.
+//
+// Basic mods: a plain .asi with no mod.ini, loose in plugins\ or directly inside a folder there that has no mod.ini.
+// Each gets a switch under [basic_mods], keyed by its path inside plugins\ (new ones off), and is loaded as it is:
+// no host, no settings, no reload, and none of the SDK's checks. A .dll is never listed.
+//
+// Safe start (startguard.h): after a start that did not finish, the next start loads no mod and writes no patch.
 
-constexpr int kMaxMods = 16;
+constexpr int kMaxMods = 32;
 constexpr int kMaxModSettings = 128;  // over all mods
 constexpr int kMaxSettingsPerMod = 24;
 constexpr int kMaxModChoices = 8;
@@ -61,6 +67,11 @@ struct Mod {
     bool loaded;
     void(__cdecl* settingsChanged)();  // DS3ModSettingsChanged, if the loaded DLL exports it
     int settingCount;  // how many of the settings in ModSettingAt are this mod's
+    bool basic;              // a plain .asi with no mod.ini
+    wchar_t switchKey[128];  // basic: its key under [basic_mods]: the file's path inside the plugins folder
+    char problem[40];       // basic: why this file can never be loaded; the panel's tag
+    char notLoaded[40];      // basic: why it was left alone this time although on (another loader, no journal)
+    bool changed;            // in a safe start: new or changed since the last start that finished
 };
 
 // Finds every mod in <moduleDir>\plugins\*\mod.ini, reads its switch from sealsIni (adding `<id>=0` when missing) and
@@ -71,6 +82,12 @@ void DiscoverMods(const wchar_t* moduleDir, const wchar_t* sealsIni, const char*
 void LoadMods();
 // Whether a discovered mod uses this [modules] key.
 bool ModIdTaken(const char* id);
+// Whether this start is a safe start (no mod was loaded), and whether the player asked for it with safe_start=1.
+bool ModsSafeStart();
+bool ModsSafeStartAsked();
+// The file name of another ASI loader found in the game (Ultimate ASI Loader), or "" if there is none. While one is
+// there, basic mods are left to it.
+const char* ModsOtherLoader();
 
 int ModCount();
 Mod& ModAt(int i);

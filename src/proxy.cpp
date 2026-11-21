@@ -12,6 +12,7 @@
 #include "overlay.h"
 #include "patches.h"
 #include "sdk.h"
+#include "startguard.h"
 #include "version.h"
 
 #include <windows.h>
@@ -27,6 +28,13 @@ HMODULE g_real = nullptr;
 INIT_ONCE g_realOnce = INIT_ONCE_STATIC_INIT;
 LONG g_createCalls = 0;
 bool g_watchInput = false;  // the Mods panel is on: watch the DirectInput devices the game creates
+
+// The overlay finds Present with a small throwaway Direct3D device of its own (overlay.cpp). Made while the game's
+// main thread is still creating its real device, that has crashed the game inside ntdll: 2 of 8 starts with no mod
+// to load, where this step came 0.3 to 0.8 s after the first DirectInput8Create, and none of 28 starts with mods,
+// whose loading happened to push it to between 0.6 and 3.4 s. So the overlay is never installed sooner than this
+// after the first DirectInput8Create. The game's input thread waits meanwhile; its main thread goes on.
+constexpr ULONGLONG kOverlayNotBeforeMs = 2500;
 
 // First 16 bytes of a function in the game's code (FUN_00a2a000) once the exe is unpacked in memory. On disk they
 // are encrypted noise, so this tells whether the game's code is readable yet.
@@ -98,6 +106,7 @@ HRESULT WINAPI Proxy_DirectInput8Create(HINSTANCE inst, DWORD version, REFIID ri
 {
     LONG call = InterlockedIncrement(&g_createCalls);
     if (call == 1) {
+        const ULONGLONG began = GetTickCount64();
         Log("first DirectInput8Create (version 0x%04lX); game .text is %s", version, TextState());
         Config config = LoadConfig(g_moduleDir);
         NoteOldIni();
@@ -111,7 +120,14 @@ HRESULT WINAPI Proxy_DirectInput8Create(HINSTANCE inst, DWORD version, REFIID ri
         LoadMods();
         // The Mods panel and DLL mods' frame callbacks draw through the overlay, so it is installed for any of them.
         bool overlay = config.modsMenu || SdkWanted();
-        if (overlay) InstallOverlay();
+        if (overlay) {
+            const ULONGLONG spent = GetTickCount64() - began;
+            if (spent < kOverlayNotBeforeMs) {
+                Log("overlay: waiting %llu ms, until the game's own Direct3D start-up is over", kOverlayNotBeforeMs - spent);
+                Sleep(static_cast<DWORD>(kOverlayNotBeforeMs - spent));
+            }
+            InstallOverlay();
+        }
         InstallSdk();
         if (config.modsMenu) {
             InstallInput();
@@ -177,6 +193,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID)
         Log("DS3 Mod Loader v" DS3_PROXY_VERSION " attached to %ls", exe);
         Log("at load, game .text is %s", TextState());
     } else if (reason == DLL_PROCESS_DETACH) {
+        StartGuardExit();  // a clean exit before the start counted as finished is not an unfinished start
         Log("detach; DirectInput8Create called %ld time(s)", g_createCalls);
     }
     return TRUE;

@@ -255,8 +255,13 @@ Put-Text $stage (Get-Content -Raw -LiteralPath (Join-Path $repo 'dist\ds3_mods.i
 Put-Text $stage @"
 Add-ons go here, one folder each (for example plugins\SealStore\). Copy a mod's folder here from the add-ons
 download ($Name-addons-v$Version.zip, folder $addonsDir), then switch it on in the Mods panel (pause, "mods")
-and restart the game. To remove an add-on, delete its folder. This text file is only here so the folder exists;
-the loader ignores it.
+and restart the game. To remove an add-on, delete its folder.
+
+Other people's .asi mods go here too: put the .asi file (and the files that came with it) in this folder, or in
+a folder of its own inside it. It shows up in the Mods panel under "Basic mods", switched off. Switch it on and
+restart the game. More in "DS3 Mod Loader docs\README.txt".
+
+This text file is only here so the folder exists; the loader ignores it.
 "@ 'plugins\README.txt'
 Put-Text $stage (Get-Content -Raw -LiteralPath (Join-Path $repo 'dist\README.txt')).Replace('{VERSION}', $Version) "$docsDir\README.txt"
 Put-Text $stage (Get-Content -Raw -LiteralPath (Join-Path $repo 'dist\CHANGELOG.txt')) "$docsDir\CHANGELOG.txt"

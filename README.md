@@ -18,6 +18,7 @@ something with it, I'd love to see it.
 |---|---|
 | **Mods panel** | Pause > "mods" (or F11, or Back on a pad). Every mod's switch and the settings it lists, saved at once. |
 | **Drop-in mods** | A mod is one folder in `plugins\`. New mods start off until you switch them on. |
+| **Plain .asi mods** | Drop someone else's `.asi` into `plugins\` and switch it on in the panel. No setup file needed. |
 | **A mod kit** | Everything you need to make your own mods, with a beginner guide. |
 
 The loader itself changes nothing in how the game plays. Every feature is an **optional add-on**, made with the
@@ -40,13 +41,13 @@ ones you want.
 ## Install (players)
 
 1. **Back up your saves**: copy `Documents\EA Games\Dead Space 3` somewhere safe.
-2. Download `ds3-mod-loader-v1.0.0.zip` from [Releases](https://github.com/RHFlyer/Dead-Space-3-Mod-Loader/releases).
+2. Download `ds3-mod-loader-v1.1.0.zip` from [Releases](https://github.com/RHFlyer/Dead-Space-3-Mod-Loader/releases).
 3. Unzip it into the game folder, next to `deadspace3.exe` (Steam: right-click Dead Space 3 > Manage > Browse
    local files). That adds `dinput8.dll`, `ds3_mods.ini`, a `plugins` folder for add-ons and a
    `DS3 Mod Loader docs` folder.
 4. Start the game, pause, and choose **mods**.
 
-Add-ons: download `ds3-mod-loader-addons-v1.0.0.zip`, unzip it anywhere and read `READ ME FIRST.txt`. Copy the
+Add-ons: download `ds3-mod-loader-addons-v1.1.0.zip`, unzip it anywhere and read `READ ME FIRST.txt`. Copy the
 folder of each mod you want into `plugins\` in the game folder, switch it on in the Mods panel, and restart the
 game. For 1:1 mouse aim, that's the Raw Input Mouse Fix; the game's own Mouse Sensitivity slider still sets its
 speed.
@@ -61,14 +62,15 @@ You don't need to be a programmer to start:
 - **Patch mods** change a few bytes of the game with nothing but a text file (`mod.ini`). Mouse Slider Range is one.
 - **DLL mods** use a small C++ SDK for drawing on screen, reading resources and items, and hooking the game safely,
   with hot reload while the game runs. The other five add-ons are DLL mods.
-- Already have an ASI mod? The guide shows how to drop it into `plugins\` as it is, or rebuild it with the SDK, as
-  was done for the Raw Input Mouse Fix.
+- Already have an ASI mod? Most load as they are: drop the `.asi` into `plugins\`. The guide shows how to give it
+  a name and settings in the panel with a `mod.ini`, or rebuild it with the SDK, as was done for the Raw Input
+  Mouse Fix.
 
 The add-ons are deliberately different from each other: a mouse fix, a store, an item collector, an on-screen
 counter and a one-line number change all run on the same kit. Try something unusual.
 
 Start with the beginner guide, [`sdk/README.md`](sdk/README.md): what you need, a word list, your first patch mod and
-your first DLL mod, and how to release and update a mod. The source download (`ds3-mod-loader-source-v1.0.0.zip`)
+your first DLL mod, and how to release and update a mod. The source download (`ds3-mod-loader-source-v1.1.0.zip`)
 has the guide, `ds3mod.h` and the source of every add-on. Known game addresses are in
 [`sdk/GAME_NOTES.md`](sdk/GAME_NOTES.md), and a read-only memory inspector is in
 [`scripts/ds3_mcp.py`](scripts/ds3_mcp.py) (in the source download it is in `sdk\tools\`).
@@ -96,6 +98,11 @@ cmake --build build --config Release
 - If something goes wrong, open an issue and attach `ds3_mods.log` from the game folder. The log writes your folders
   as `<game>` and `%USERPROFILE%`, so your Windows user name isn't in it.
 - A DLL mod is a program: only install mods from people you trust.
+- If a start doesn't finish (a mod crashed the game in its first seconds), the next start is a **safe start**: no
+  mods are loaded, so you can pause and switch the mod off. For a crash later on, ask for one yourself with
+  `safe_start=1` (see the README in the download).
+- Using this loader together with Ultimate ASI Loader is not supported. You don't need it: plain `.asi` mods go in
+  `plugins\`.
 
 ## How this was made
 
@@ -128,6 +135,9 @@ How to do each of these: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 This project never touches paid DLC, entitlements, ownership or the game's copy protection, and mods made with it
 must not either. The loader refuses patches and hooks in the store, login and paid-content code it knows about;
 the rule covers the rest.
+
+A plain `.asi` without a `mod.ini` is loaded as it is. The loader does not check it, and what it does is up to
+its maker and to you: only use mods from people you trust.
 
 ## Credits and licence
 

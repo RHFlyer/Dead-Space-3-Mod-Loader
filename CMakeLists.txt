@@ -30,6 +30,8 @@ add_library(dinput8 SHARED
     src/modmenu.cpp
     src/mods.cpp
     src/patches.cpp
+    src/pefile.cpp
+    src/startguard.cpp
     src/overlay.cpp
     src/sdk.cpp
     src/dinput8.def
