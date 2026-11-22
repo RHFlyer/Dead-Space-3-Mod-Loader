@@ -10,7 +10,7 @@ Dead Space 3 never got a proper modding scene on PC, and even experienced modder
 help in some way, so I tried my hand at making tools that give everyone easier access to mods. If you make
 something with it, I'd love to see it.
 
-![The Mods panel in the pause menu](docs/images/mods-panel.png)
+![The Mods panel in the pause menu, with a plain .asi mod under "Basic mods" and Auto Pickup's settings](docs/images/mods-panel.jpg)
 
 ## What you get
 
