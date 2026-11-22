@@ -134,11 +134,14 @@ Fixes, new findings and updates are very welcome, from beginners and experts ali
 
 How to do each of these: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-## Rules for every mod
+## Our intentions
 
-This project never touches paid DLC, entitlements, ownership or the game's copy protection, and mods made with it
-must not either. The loader refuses patches and hooks in the store, login and paid-content code it knows about;
-the rule covers the rest.
+This project is for mods that make Dead Space 3 better to play and easier to mod. It never touches paid DLC,
+entitlements, ownership or the game's copy protection, and we strongly discourage using the loader to get around
+those systems. Mods like that aren't supported, linked or accepted here; mod hosting sites decide what they host.
+
+The loader's own patch and hook functions leave out the account, store and paid-content code they know about. Plain
+`.asi` mods are loaded as they are, like with any ASI loader.
 
 A plain `.asi` without a `mod.ini` is loaded as it is. The loader does not check it, and what it does is up to
 its maker and to you: only use mods from people you trust.

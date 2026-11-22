@@ -201,11 +201,10 @@ How it keeps the game safe:
   first. The proxy's own hooks are protected the same way.
 - **Only the game's own code and data** (`.text`, `.rdata`, `.data` of `deadspace3.exe`). Never the DRM wrapper
   (its code lives in another part of the exe, which is never patchable).
-- **Never DLC ownership, entitlements, the store, login or Origin.** Patches there are refused in two ways: a list of
-  address ranges known to hold that code, and a check that refuses any patch within 64 bytes of text about
-  entitlements, DLC ownership or logins. **Neither is a complete map:** where all of the game's
-  entitlement and DLC code lies is not known. So the rule stands on its own, whatever the checks catch: this project
-  never changes paid DLC, entitlements, ownership or the DRM, and patch mods made with it must not either.
+- **Not the account, store or paid-content code.** Patches there are refused in two ways: a list of address ranges
+  known to hold the store, DLC ownership, login and Origin code, and a check that refuses any patch within 64 bytes
+  of text about entitlements, DLC ownership or logins. Neither is a complete map. This project never changes paid
+  DLC, entitlements, ownership or the DRM, and strongly discourages using the loader to get around them.
 - **Live changes.** A `value` or `toggle` patch is rewritten at once when the setting changes in the panel
   ("applied now") if the bytes it writes fit inside one aligned block of 8: the first written byte (`address` plus
   `offset`) and the last one in the same block of 8 that starts at an address divisible by 8. When several patches

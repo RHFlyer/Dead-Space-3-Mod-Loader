@@ -97,8 +97,8 @@ Good to know
     folder, e.g. plugins\SealStore\seal_store.log), and send it along with your report. They hold no account
     details, and the loader's log writes the game folder as <game> and your user folder as %USERPROFILE%, so your
     Windows user name is not in it.
-  - This mod never touches paid DLC, entitlements, ownership or the game's DRM, and mods made with its SDK must not
-    either. A DLL mod is a program: install mods from other people only if you trust them.
+  - This mod never touches paid DLC, entitlements, ownership or the game's DRM, and we strongly discourage using it
+    to get around them. A DLL mod is a program: install mods from other people only if you trust them.
 
 Known issues
   - Tested at 1920x1080 with keyboard and mouse. Other resolutions, ultrawide screens and a controller on the

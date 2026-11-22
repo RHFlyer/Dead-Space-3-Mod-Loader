@@ -50,9 +50,9 @@
  *            DS3Frame.gradient (check DS3FRAME_HAS: test builds before 1.0.0 called themselves API 3 without them)
  *   DS3 Mod Loader 1.0.0 has all of these (API 3).
  *
- * Hard lines, for every mod made with this SDK: never change paid DLC, entitlements, ownership, or the DRM wrapper,
- * and never read the process environment or memory you don't need (it holds EA login tokens). hook and patch refuse
- * the areas of the game known to hold that code, but that list is not complete: the rule stands on its own.
+ * This project never changes paid DLC, entitlements, ownership or the DRM wrapper, and strongly discourages mods
+ * that try. Don't read the process environment or memory you don't need: it holds EA login tokens. hook and patch
+ * refuse the areas of the game known to hold that code; that list is not complete.
  */
 #ifndef DS3MOD_H
 #define DS3MOD_H

@@ -41,11 +41,11 @@ With the memory inspector: `status` shows all of these; `read player+0x594 4 dwo
 - Every circuit of the main set, with its stats and GUID: [`CIRCUITS.md`](CIRCUITS.md).
 - Item GUIDs are 16 bytes; the inspector and `host->itemName()` turn them into names.
 
-## Places the loader never lets a mod change
+## Places the loader's patches and hooks leave alone
 
-Patches and hooks are refused inside the game's login, store/checkout and DLC-ownership code, and next to text
-about entitlements or ownership. This keeps mods away from accounts and paid content. Mods made with this SDK
-must not try to unlock paid DLC or change what you own.
+Patches and hooks made through the loader are refused inside the game's login, store/checkout and DLC-ownership
+code, and next to text about entitlements or ownership. This keeps mods away from accounts and paid content. This
+project doesn't change paid DLC or what you own, and strongly discourages mods that try.
 
 ## Adding to this page
 
