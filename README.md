@@ -25,12 +25,12 @@ The loader itself changes nothing in how the game plays. Every feature is an **o
 same kit anyone can use, with its source to learn from. All six come in one add-ons download; install only the
 ones you want.
 
-- **Raw Input Mouse Fix**: 1:1 mouse aim, without the game's acceleration and camera smoothing. Based on
+- **Raw Input Mouse Fix** ([its own page](https://github.com/RHFlyer/Dead-Space-3-Mouse-Fix-Adaptation)): 1:1 mouse aim, without the game's acceleration and camera smoothing. Based on
   [slopkhayzo's fix](https://github.com/slopkhayzo/DeadSpace3-RawInputMouseFix), rebuilt as an add-on.
-- **Ration Seal Store**: spend Ration Seals in the game's store again, on resource packs, circuit packs, schematics
+- **Ration Seal Store** ([its own page](https://github.com/RHFlyer/Dead-Space-3-Ration-Seal-Store)): spend Ration Seals in the game's store again, on resource packs, circuit packs, schematics
   and weapon-part unlocks. Seals only, never real money. The Resource Pack also gives one standard weapon part from
   the tables the game shipped but never used.
-- **Auto Pickup**: collects dropped items all around you without an Ammo Sweeper on your weapon, and lists what
+- **Auto Pickup** ([its own page](https://github.com/RHFlyer/Dead-Space-3-Auto-Pickup)): collects dropped items all around you without an Ammo Sweeper on your weapon, and lists what
   you just picked up.
 - **Resource Counter**: your six resources in a corner of the screen.
 - **Mouse Slider Range**: a wider range for the game's mouse sensitivity slider. It does nothing while the Raw Input
@@ -38,7 +38,21 @@ ones you want.
   its range.
 - **Hello Mod**: the smallest example mod, a hotkey that says hello.
 
+Some of these mods also have their own page. You can download them there on their own, and that's also where
+their updates, source code and bug reports are. The copy in the add-ons download is the same mod, in the same
+folder, so you can install it from either place and update it from either place.
+
 ![The Resource Counter add-on in the bottom-left corner of the screen](docs/images/resource-counter.jpg)
+
+## Mods by RHFlyer
+
+Bigger mods have their own pages, with their own downloads and updates. Each needs the DS3 Mod Loader.
+
+| Mod | What it does | Download |
+|---|---|---|
+| [Ration Seal Store](https://github.com/RHFlyer/Dead-Space-3-Ration-Seal-Store) | Spend Ration Seals in the game's store again. Seals only, never real money. | [Latest release](https://github.com/RHFlyer/Dead-Space-3-Ration-Seal-Store/releases/latest) |
+| [Auto Pickup](https://github.com/RHFlyer/Dead-Space-3-Auto-Pickup) | Collects dropped items all around you, without an Ammo Sweeper. | [Latest release](https://github.com/RHFlyer/Dead-Space-3-Auto-Pickup/releases/latest) |
+| [Raw Input Mouse Fix](https://github.com/RHFlyer/Dead-Space-3-Mouse-Fix-Adaptation) | 1:1 mouse aim, based on slopkhayzo's fix. | [Latest release](https://github.com/RHFlyer/Dead-Space-3-Mouse-Fix-Adaptation/releases/latest) |
 
 ## Install (players)
 
