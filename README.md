@@ -38,6 +38,8 @@ ones you want.
   its range.
 - **Hello Mod**: the smallest example mod, a hotkey that says hello.
 
+![The Resource Counter add-on in the bottom-left corner of the screen](docs/images/resource-counter.jpg)
+
 ## Install (players)
 
 1. **Back up your saves**: copy `Documents\EA Games\Dead Space 3` somewhere safe.
@@ -46,6 +48,8 @@ ones you want.
    local files). That adds `dinput8.dll`, `ds3_mods.ini`, a `plugins` folder for add-ons and a
    `DS3 Mod Loader docs` folder.
 4. Start the game, pause, and choose **mods**.
+
+![The "mods" button in the game's pause menu](docs/images/pause-menu-mods-button.png)
 
 Add-ons: download `ds3-mod-loader-addons-v1.1.0.zip`, unzip it anywhere and read `READ ME FIRST.txt`. Copy the
 folder of each mod you want into `plugins\` in the game folder, switch it on in the Mods panel, and restart the
