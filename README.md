@@ -112,7 +112,8 @@ cmake --build build --config Release
 ## Good to know
 
 - Made for the **Steam** version of Dead Space 3. Tested at 1920x1080 with keyboard and mouse.
-- **Co-op hasn't been tested.** If you try it, please report what happens.
+- **Co-op is lightly tested:** a few co-op games with the loader ran without problems. If you play co-op with it,
+  please report what happens.
 - If something goes wrong, open an issue and attach `ds3_mods.log` from the game folder. The log writes your folders
   as `<game>` and `%USERPROFILE%`, so your Windows user name isn't in it.
 - A DLL mod is a program: only install mods from people you trust.
