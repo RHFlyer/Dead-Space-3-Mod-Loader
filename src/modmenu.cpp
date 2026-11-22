@@ -114,6 +114,11 @@ ULONGLONG g_lastRepeat[4] = {};
 float g_cursorX = 0, g_cursorY = 0;
 bool g_cursorShown = false;
 POINT g_lastOsCursor = {};
+// Where the cursor was when the panel opened. The game's own cursor does not move while the panel blocks its input,
+// so Close() puts the copy (and the Windows cursor) back there, on top of the game's cursor again.
+float g_openCursorX = 0, g_openCursorY = 0;
+POINT g_openOsCursor = {};
+bool g_openOsKnown = false;
 
 // Layout from the last draw, for the mouse.
 struct Box {
@@ -477,6 +482,14 @@ const char* ModHelp(const Mod& m)
                     m.minLoader, g_helpText);
         strcpy_s(g_helpText, need);
     }
+    if (m.touchedProtected) {
+        // In front too: the loader refused part of what this mod asked for (patches.cpp), whatever else it does.
+        char warn[sizeof(g_helpText)];
+        _snprintf_s(warn, _TRUNCATE, "This mod tried to change the game's account, store or paid-content code. %s "
+                    "Mods like this can put your EA account at risk. %s",
+                    m.loaded ? "The loader didn't apply that part." : "The loader didn't load it.", g_helpText);
+        strcpy_s(g_helpText, warn);
+    }
     // Its settings are left out of the panel while it is not loaded (BuildRows).
     bool hasSettings = false;
     for (int i = 0; i < ModSettingCount() && !hasSettings; ++i) hasSettings = &ModAt(ModSettingAt(i).mod) == &m;
@@ -538,6 +551,9 @@ void Open()
 {
     g_open = true;
     g_releasing = false;
+    g_openCursorX = g_cursorX;
+    g_openCursorY = g_cursorY;
+    g_openOsKnown = GetCursorPos(&g_openOsCursor) != 0;
     g_cursorShown = false;
     g_capture = -1;
     if (!Selectable(g_selected)) Move(1);
@@ -552,6 +568,13 @@ void Close()
 {
     g_open = false;
     g_releasing = true;  // unblocked once nothing is held
+    // Open() hid the panel's cursor until the mouse moves; the game's cursor is back on the pause menu now, so the
+    // copy over the "mods" button must be too (else it stays under the button until the mouse moves). The game's
+    // cursor is still where it was when the panel opened, so the copy goes back there too.
+    g_cursorX = g_openCursorX;
+    g_cursorY = g_openCursorY;
+    if (g_openOsKnown && SetCursorPos(g_openOsCursor.x, g_openOsCursor.y)) g_lastOsCursor = g_openOsCursor;
+    g_cursorShown = true;
     Log("mods panel: closed");
 }
 
@@ -1192,6 +1215,10 @@ void DrawPanel(OverlayCanvas& c)
             if (m.needsLoader) {
                 sprintf_s(tagText, "needs loader %s", m.minLoader);
                 tag = tagText;
+                changed = true;
+            }
+            if (m.touchedProtected) {  // a patch or hook in protected code was refused (more in the footer)
+                tag = m.loaded ? "protected part refused" : "protected code refused";
                 changed = true;
             }
             if (m.problem[0]) {

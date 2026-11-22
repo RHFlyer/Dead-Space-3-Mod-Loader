@@ -66,7 +66,8 @@ $sourceDir = 'Source code'
 
 # The optional add-ons: plugins folder name, its source folder under sdk\, built files (from build\plugins\<Mod>\),
 # files of its source folder that ship as they are (Extra), and what READ ME FIRST.txt says about it (About; For is
-# 'players' or 'makers').
+# 'players' or 'makers'). Page: the mod's own repo, once it has a published release: READ ME FIRST.txt and the mod's
+# README.txt then say it can also be downloaded there. Set it only when <Page>/releases/latest opens signed out.
 $addons = @(
     @{ Folder = 'RawInputMouseFix'; Source = 'sdk\raw_mouse';          Built = @('DS3RawMouse.asi'); For = 'players';
        # Based on slopkhayzo's fix (MIT): their licence ships next to the project's.
@@ -92,6 +93,9 @@ patch mod: no code, only its mod.ini. No effect while the Raw Input Mouse Fix''s
        About = 'The smallest example mod: press F12 and it says hello on screen. Only useful if you want to see
 how a mod is made.' }
 )
+# Mods with their own page that are no longer in the add-ons download: @{ Name = '...'; Page = 'https://...' }.
+# They stay listed under "More mods by RHFlyer" in READ ME FIRST.txt.
+$moreMods = @()
 
 # ---- Build ----
 if (-not $SkipBuild) {
@@ -273,6 +277,7 @@ $results += Close-Stage $stage '' $docsDir
 # ---- Add-ons zip: every mod in one folder, each in its own folder, with READ ME FIRST.txt ----
 $stage = New-Stage "$Name-addons-v$Version"
 $index = @()
+$pages = @($moreMods | ForEach-Object { [pscustomobject]$_ })
 foreach ($a in $addons) {
     $src = Join-Path $repo $a.Source
     $m = Read-Manifest (Join-Path $src 'mod.ini')
@@ -283,6 +288,14 @@ foreach ($a in $addons) {
     Put-Text $stage (Get-Content -Raw -LiteralPath (Join-Path $src 'CHANGELOG.txt')) "$dir\CHANGELOG.txt"
     $title = "$($m.name) $($m.version), an optional add-on for the DS3 Mod Loader"
     $credit = if ($a.Credit) { "`n$($a.Credit)`n" } else { '' }
+    $where = if ($a.Page) {
+        "Its own page: $($a.Page)/releases/latest`n" +
+        "There you'll find it as a download of its own, its newer versions, its source and where to report bugs. This`n" +
+        "download has version $($m.version); if the page has a newer one, unzip it into the game folder: it lands on this`n" +
+        "copy and keeps your settings. MIT licence (LICENSE.txt)."
+    } else {
+        "Its source is in the source download, under $sourceDir\sdk\$(Split-Path -Leaf $a.Source)\. MIT licence`n(LICENSE.txt)."
+    }
     $readme = @"
 $title
 $('=' * $title.Length)
@@ -302,14 +315,18 @@ says what changed.
 
 Remove: delete plugins\$($a.Folder).
 
-Its source is in the source download, under $sourceDir\sdk\$(Split-Path -Leaf $a.Source)\. MIT licence
-(LICENSE.txt).
+$where
 "@
     Put-Text $stage $readme "$dir\README.txt"
     Put-Text $stage (Get-Content -Raw -LiteralPath $licence) "$dir\LICENSE.txt"
     $by = if ($m.author) { ", by $($m.author)" } else { '' }
+    $pageLines = if ($a.Page) {
+        "    Also on its own page, where its updates come out first, with its source and bug reports:`n" +
+        "    $($a.Page)/releases/latest`n"
+    } else { '' }
     $index += [pscustomobject]@{ For = $a.For; Text = "  $($m.name) $($m.version): folder $($a.Folder)$by`n" +
-        (($a.About -split "`r?`n" | ForEach-Object { "    $_" }) -join "`n") + "`n" }
+        (($a.About -split "`r?`n" | ForEach-Object { "    $_" }) -join "`n") + "`n" + $pageLines }
+    if ($a.Page) { $pages += [pscustomobject]@{ Name = $m.name; Page = $a.Page } }
 }
 # The player's settings are never in the add-ons zip: a new version copied over the old one must not reset them.
 $settings = Get-ChildItem -Recurse -File -LiteralPath $stage -Filter '*.ini' | Where-Object { $_.Name -ne 'mod.ini' }
@@ -317,6 +334,11 @@ if ($settings) { throw "the add-ons zip must not hold a settings file: $($settin
 $title = "DS3 Mod Loader ${Version}: add-ons"
 $forPlayers = ($index | Where-Object For -eq 'players' | ForEach-Object Text) -join "`n"
 $forMakers = ($index | Where-Object For -eq 'makers' | ForEach-Object Text) -join "`n"
+if ($pages) {
+    $width = ($pages | ForEach-Object { $_.Name.Length } | Measure-Object -Maximum).Maximum + 4
+    $forMakers += "`nMore mods by RHFlyer`n  Each has its own page. Every one needs the DS3 Mod Loader, like the mods above.`n" +
+        (($pages | Sort-Object Name | ForEach-Object { "  $($_.Name.PadRight($width))$($_.Page)/releases/latest" }) -join "`n") + "`n"
+}
 $readFirst = @"
 $title
 $('=' * $title.Length)

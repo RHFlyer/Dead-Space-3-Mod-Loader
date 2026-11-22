@@ -383,6 +383,7 @@ bool ParsePatch(int modIndex, const wchar_t* manifest, const wchar_t* sec, ModPa
     if (const char* what = RefusedRange(p.va, p.expectLen)) {
         Log("mod %s: [%ls] 0x%08X is in %s, which patch mods may never change; skipped mod", m.id, sec,
             static_cast<unsigned>(p.va), what);
+        ModAt(modIndex).touchedProtected = true;  // for the panel only
         return false;
     }
     if (!InExeSections(p.va, p.expectLen)) {
@@ -478,9 +479,10 @@ bool PatchesAllowed()
     return g_patchesAllowed;
 }
 
-bool ModRangeAllowed(uintptr_t va, size_t size, bool codeOnly, char* why, size_t whySize)
+bool ModRangeAllowed(uintptr_t va, size_t size, bool codeOnly, char* why, size_t whySize, bool* isProtected)
 {
     why[0] = '\0';
+    if (isProtected) *isProtected = false;
     if (!size || size > static_cast<size_t>(kMaxPatchBytes)) {
         sprintf_s(why, whySize, "%u bytes is not 1 to %d", static_cast<unsigned>(size), kMaxPatchBytes);
     } else if (!InExeSections(va, size, codeOnly)) {
@@ -489,9 +491,11 @@ bool ModRangeAllowed(uintptr_t va, size_t size, bool codeOnly, char* why, size_t
     } else if (const char* what = RefusedRange(va, size)) {
         sprintf_s(why, whySize, "0x%08X is in the area of %s, which mods may never change", static_cast<unsigned>(va),
                   what);
+        if (isProtected) *isProtected = true;
     } else if (NearProtectedText(va, size)) {
         sprintf_s(why, whySize, "0x%08X is next to protected text (accounts, store or paid content), which mods may "
                   "never change", static_cast<unsigned>(va));
+        if (isProtected) *isProtected = true;
     }
     return why[0] == '\0';
 }
@@ -581,6 +585,7 @@ bool ApplyModPatches(int modIndex)
         if (NearProtectedText(p.va, p.expectLen)) {
             Log("mod %s: [%s] 0x%08X is next to protected text (accounts, store or paid content), which patch mods "
                 "may never change", m.id, p.name, static_cast<unsigned>(p.va));
+            ModAt(modIndex).touchedProtected = true;  // for the panel only
             ok = false;
         } else if (!ReadBytes(p.va, now, p.expectLen)) {
             Log("mod %s: [%s] 0x%08X cannot be read", m.id, p.name, static_cast<unsigned>(p.va));

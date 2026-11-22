@@ -571,7 +571,13 @@ bool ParseMod(const wchar_t* pluginsDir, const wchar_t* folder, const char* cons
     // Patches, which may take their bytes from the settings above. A mod with one unusable patch is skipped whole.
     if (!ParseModPatches(g_modCount, manifest)) {
         g_settingCount = firstSetting;
-        return false;
+        if (!m.touchedProtected) return false;
+        // Refused as always (no patch of it is kept and it is never loaded), but listed, so the panel can say why.
+        m.settingCount = 0;
+        strcpy_s(m.problem, "protected code refused");
+        ReadSwitch(m);
+        ++g_modCount;
+        return true;
     }
     if (!m.file[0] && !ModPatchCount(g_modCount)) {
         Log("mods: plugins\\%ls\\mod.ini has neither file= under [mod] nor any [patch] section; skipped", folder);
@@ -1527,6 +1533,10 @@ void LoadMods()
         Mod& m = g_mods[i];
         if (m.basic) continue;
         if (m.needsLoader) continue;  // said so when it was found
+        if (m.problem[0]) {  // a patch in a protected area: refused when it was found, never loaded
+            if (m.enabled) Log("mod %s: on, but not loaded: %s", m.id, m.problem);
+            continue;
+        }
         if (!m.enabled) {
             Log("mod %s: off", m.id);
             continue;

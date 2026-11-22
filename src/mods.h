@@ -69,9 +69,14 @@ struct Mod {
     int settingCount;  // how many of the settings in ModSettingAt are this mod's
     bool basic;              // a plain .asi with no mod.ini
     wchar_t switchKey[128];  // basic: its key under [basic_mods]: the file's path inside the plugins folder
-    char problem[40];       // basic: why this file can never be loaded; the panel's tag
+    char problem[40];       // why this file can never be loaded (a basic mod, or touchedProtected below); the tag
     char notLoaded[40];      // basic: why it was left alone this time although on (another loader, no journal)
     bool changed;            // in a safe start: new or changed since the last start that finished
+    // A patch or hook it asked for lay in a protected area (accounts, store or paid content: patches.cpp) and was
+    // refused, as always. Only so the Mods panel can say so on its row; the refusal itself is unchanged. Set once and
+    // never cleared: it stays until the game is restarted, also after a hot reload of a build that no longer asks.
+    // The thread that asked sets it and the panel reads it later, with no lock: the row may show it a frame late.
+    bool touchedProtected;
 };
 
 // Finds every mod in <moduleDir>\plugins\*\mod.ini, reads its switch from sealsIni (adding `<id>=0` when missing) and

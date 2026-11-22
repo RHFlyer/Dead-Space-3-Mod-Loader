@@ -536,8 +536,9 @@ use: the Raw Input Mouse Fix add-on has F6-F10, the panel opens on F11, Hello Mo
   game and logs it; the game keeps running. A crash in your own thread or in a hook can still take the game down.
 - **Check `apiVersion`.** A mod that uses API 2 calls should check `host->apiVersion >= 2` in `DS3ModInit`, as the
   sample does, and say in the log that it needs a newer proxy. `DS3MOD_HAS(host, field)` checks one field.
-- **Don't** read the process environment or memory you don't need: it holds EA login tokens. **Never** change paid
-  DLC, entitlements, ownership or the DRM wrapper. The SDK refuses the code it knows about; the rule covers the rest.
+- **Don't** read the process environment or memory you don't need: it holds EA login tokens. This project never
+  changes paid DLC, entitlements, ownership or the DRM wrapper: the SDK refuses the code it knows about, and the
+  project strongly discourages the rest.
 
 ### Rebuild while the game runs (hot reload)
 

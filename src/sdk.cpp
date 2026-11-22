@@ -309,8 +309,10 @@ int __cdecl HostHook(const DS3ModHost* host, const char* name, unsigned address,
     }
     char why[200];
     const size_t span = std::max<size_t>(expectLen, kHookBytes);
-    if (!ModRangeAllowed(address, span, true, why, sizeof(why))) {
+    bool prot = false;
+    if (!ModRangeAllowed(address, span, true, why, sizeof(why), &prot)) {
         Log("mod %s: hook %s refused: %s", id, name, why);
+        if (prot) ModAt(mi).touchedProtected = true;  // for the panel only
         return 0;
     }
     uint8_t now[kMaxPatchBytes];
@@ -402,8 +404,10 @@ int __cdecl HostPatch(const DS3ModHost* host, const char* name, unsigned address
         return 0;
     }
     char why[200];
-    if (!ModRangeAllowed(address, len, false, why, sizeof(why))) {
+    bool prot = false;
+    if (!ModRangeAllowed(address, len, false, why, sizeof(why), &prot)) {
         Log("mod %s: patch %s refused: %s", id, name, why);
+        if (prot) ModAt(mi).touchedProtected = true;  // for the panel only
         return 0;
     }
     uint8_t now[kMaxPatchBytes];

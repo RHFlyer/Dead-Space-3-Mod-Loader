@@ -16,7 +16,13 @@ Changelog
   - The Mods panel shows a mod's settings only while the mod is loaded; a mod that is off (or did not load) keeps
     just its switch, whose help line says how to see its settings.
   - Mods panel: a help text too long for the bottom of the panel now scrolls instead of being cut off, and the
-    mouse cursor is drawn over the pause menu's "mods" button, not behind it.
+    mouse cursor is drawn over the pause menu's "mods" button, not behind it. When the panel closes, the cursor
+    is at once back where it was when the panel opened, not only when the mouse moves.
+  - When a mod asks to change the game's account, store or paid-content code, the loader refuses it, as before:
+    a mod that asks for it in its mod.ini is not loaded at all, and a DLL mod that asks for it while it runs goes
+    on without that change. The mod's row in the Mods panel now says so ("protected code refused" for the first,
+    "protected part refused" for the second), and its help line warns that mods like this can put your EA account
+    at risk. Before, only ds3_mods.log said so, and such a patch mod was left out of the panel.
   - Worked around a rare crash right at the start of the game when no mod was switched on (it was in 1.0.0
     too): the loader now waits a moment before it sets up its drawing.
   - Up to 32 mods (was 16).

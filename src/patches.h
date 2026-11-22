@@ -30,8 +30,10 @@ bool ClaimHeldBy(uintptr_t va, const char* owner);
 // whether the decryption gate below is open;
 bool PatchesAllowed();
 // whether a mod may change [va, va + size): 1 to kMaxPatchBytes bytes, inside the exe's .text / .rdata / .data (only
-// .text if codeOnly), not in a refused range, not next to protected text. If not, `why` says so in a sentence;
-bool ModRangeAllowed(uintptr_t va, size_t size, bool codeOnly, char* why, size_t whySize);
+// .text if codeOnly), not in a refused range, not next to protected text. If not, `why` says so in a sentence, and
+// *isProtected says whether it was one of the last two (accounts, store or paid content: the panel shows those);
+bool ModRangeAllowed(uintptr_t va, size_t size, bool codeOnly, char* why, size_t whySize,
+                     bool* isProtected = nullptr);
 // and crash-proof reads and writes of the game's bytes (writes: page made writable for the moment, atomic when the
 // bytes lie in one aligned 8-byte block, instruction cache flushed).
 bool ReadGameBytes(uintptr_t va, void* out, size_t size);
